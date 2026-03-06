@@ -1,0 +1,122 @@
+name: Update and Build Flatpak
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Every Monday at 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      force_version:
+        description: 'Force a specific version (e.g. 1.1.5-1). Leave empty for auto-detect.'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  # ── 1. Detect if there is a new upstream release ──────────────────────────
+  check:
+    name: Check for new version
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.detect.outputs.new_version }}
+      version:     ${{ steps.detect.outputs.version }}
+      url:         ${{ steps.detect.outputs.url }}
+      sha256:      ${{ steps.detect.outputs.sha256 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect latest version
+        id: detect
+        run: |
+          FORCE="${{ github.event.inputs.force_version }}"
+
+          if [ -n "$FORCE" ]; then
+            VERSION="$FORCE"
+            URL="https://proton.me/download/authenticator/linux/ProtonAuthenticator-${VERSION}.x86_64.rpm"
+          else
+            eval "$(python3 scripts/check-version.py)"
+            if [ -z "$VERSION" ]; then
+              echo "::error::Could not detect latest version from Proton website."
+              exit 1
+            fi
+          fi
+
+          CURRENT=$(grep -oP '(?<=ProtonAuthenticator-)[\d.]+-\d+(?=\.x86_64\.rpm)' \
+                    me.proton.Authenticator.yml | head -1)
+          echo "Latest:  $VERSION"
+          echo "Current: $CURRENT"
+
+          if [ "$VERSION" = "$CURRENT" ] && [ -z "$FORCE" ]; then
+            echo "Already up to date."
+            echo "new_version=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version found: $VERSION"
+            curl -fsSL -o /tmp/ProtonAuthenticator.rpm "$URL"
+            SHA256=$(sha256sum /tmp/ProtonAuthenticator.rpm | awk '{print $1}')
+
+            echo "new_version=true"  >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION"  >> "$GITHUB_OUTPUT"
+            echo "url=$URL"          >> "$GITHUB_OUTPUT"
+            echo "sha256=$SHA256"    >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── 2. Update manifest, build Flatpak, publish release ───────────────────
+  build:
+    name: Build and publish
+    needs: check
+    if: needs.check.outputs.new_version == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update manifest
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+          URL:     ${{ needs.check.outputs.url }}
+          SHA256:  ${{ needs.check.outputs.sha256 }}
+        run: |
+          sed -i "s|url: https://proton\.me/download/authenticator/linux/.*\.rpm|url: ${URL}|" \
+            me.proton.Authenticator.yml
+          sed -i "s|sha256: [a-f0-9]\{64\}|sha256: ${SHA256}|" \
+            me.proton.Authenticator.yml
+
+      - name: Build Flatpak bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: ProtonAuthenticator-${{ needs.check.outputs.version }}.flatpak
+          manifest-path: me.proton.Authenticator.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+
+      - name: Commit manifest update
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add me.proton.Authenticator.yml
+          git commit -m "chore: update to Proton Authenticator ${{ needs.check.outputs.version }} [skip ci]"
+          git push
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.check.outputs.version }}
+          name: Proton Authenticator ${{ needs.check.outputs.version }}
+          body: |
+            Automated Flatpak build of **Proton Authenticator ${{ needs.check.outputs.version }}**.
+
+            ## Install
+
+            ```bash
+            flatpak install ProtonAuthenticator-${{ needs.check.outputs.version }}.flatpak
+            ```
+
+            Or run directly:
+
+            ```bash
+            flatpak run me.proton.Authenticator
+            ```
+
+            ---
+            Source: ${{ needs.check.outputs.url }}
+          files: ProtonAuthenticator-${{ needs.check.outputs.version }}.flatpak

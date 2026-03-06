@@ -1,0 +1,8 @@
+# Flatpak build artefacts
+build-dir/
+repo/
+.flatpak-builder/
+*.flatpak
+
+# Downloaded RPMs (never commit binaries)
+*.rpm

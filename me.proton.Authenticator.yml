@@ -1,0 +1,33 @@
+app-id: me.proton.Authenticator
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+command: proton-authenticator
+
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  - --talk-name=org.freedesktop.secrets
+  - --talk-name=org.freedesktop.Notifications
+
+modules:
+  - name: proton-authenticator
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 usr/bin/proton-authenticator /app/bin/proton-authenticator
+      - install -Dm644 "usr/share/applications/Proton Authenticator.desktop" /app/share/applications/me.proton.Authenticator.desktop
+      - sed -i 's|^Icon=.*|Icon=me.proton.Authenticator|' /app/share/applications/me.proton.Authenticator.desktop
+      - install -Dm644 usr/share/icons/hicolor/32x32/apps/proton-authenticator.png /app/share/icons/hicolor/32x32/apps/me.proton.Authenticator.png
+      - install -Dm644 usr/share/icons/hicolor/128x128/apps/proton-authenticator.png /app/share/icons/hicolor/128x128/apps/me.proton.Authenticator.png
+      - install -Dm644 usr/share/icons/hicolor/256x256@2/apps/proton-authenticator.png /app/share/icons/hicolor/256x256@2/apps/me.proton.Authenticator.png
+    sources:
+      - type: archive
+        url: https://proton.me/download/authenticator/linux/ProtonAuthenticator-1.1.4-1.x86_64.rpm
+        sha256: 1673f13312ee42b2a7f3822e7e15c8f778f0748f414554a12942fa348a474472
+        x-checker-data:
+          type: html
+          url: https://proton.me/download/authenticator
+          pattern: (https://proton\.me/download/authenticator/linux/ProtonAuthenticator-([\d.]+-\d+)\.x86_64\.rpm)
