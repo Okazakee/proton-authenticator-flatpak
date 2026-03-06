@@ -118,15 +118,23 @@ jobs:
       - name: Install flatpak and flatpak-builder
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y flatpak flatpak-builder
+          sudo apt-get install -y flatpak flatpak-builder libarchive-tools
           sudo flatpak remote-add --system --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           sudo flatpak install --system -y flathub org.gnome.Platform//48 org.gnome.Sdk//48
+
+      - name: Download RPM and prepare CI build manifest
+        env:
+          URL: ${{ needs.check.outputs.url }}
+        run: |
+          curl -fsSL -o ProtonAuthenticator.rpm "$URL"
+          bsdtar -xf ProtonAuthenticator.rpm usr/bin/proton-authenticator
+          python3 scripts/patch-manifest-for-ci.py
 
       - name: Build Flatpak bundle
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: ProtonAuthenticator-${{ needs.check.outputs.version }}.flatpak
-          manifest-path: io.github.Okazakee.ProtonAuthenticator.yml
+          manifest-path: ci-build.yml
           cache-key: flatpak-builder-${{ github.sha }}
 
       - name: Upload bundle as artifact
