@@ -17,6 +17,10 @@ jobs:
   check:
     name: Check for new version
     runs-on: ubuntu-latest
+    # Set repo variable WEEKLY_BUILD=false to disable scheduled runs once the
+    # app is live on Flathub (flatpak-external-data-checker takes over there).
+    # Manual workflow_dispatch runs are never affected by this flag.
+    if: github.event_name != 'schedule' || vars.WEEKLY_BUILD != 'false'
     outputs:
       new_version: ${{ steps.detect.outputs.new_version }}
       version:     ${{ steps.detect.outputs.version }}
