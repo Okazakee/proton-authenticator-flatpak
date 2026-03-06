@@ -35,13 +35,10 @@ jobs:
           if [ -n "$FORCE" ]; then
             VERSION="$FORCE"
             URL="https://proton.me/download/authenticator/linux/ProtonAuthenticator-${VERSION}.x86_64.rpm"
-            # Fetch size via HEAD request
-            SIZE=$(curl -fsI "$URL" | grep -i content-length | awk '{print $2}' | tr -d '\r')
-            [ -z "$SIZE" ] && SIZE=0
           else
             eval "$(python3 scripts/check-version.py)"
             if [ -z "$VERSION" ]; then
-              echo "::error::Could not detect latest version from Proton website."
+              echo "::error::Could not detect latest version from Proton version JSON."
               exit 1
             fi
           fi
@@ -55,21 +52,20 @@ jobs:
             echo "Already up to date."
             echo "new_version=false" >> "$GITHUB_OUTPUT"
           else
-            echo "Downloading $URL to compute sha256..."
             curl -fsSL -o /tmp/ProtonAuthenticator.rpm "$URL"
             SHA256=$(sha256sum /tmp/ProtonAuthenticator.rpm | awk '{print $1}')
             ACTUAL_SIZE=$(wc -c < /tmp/ProtonAuthenticator.rpm)
 
-            echo "new_version=true"        >> "$GITHUB_OUTPUT"
-            echo "version=$VERSION"        >> "$GITHUB_OUTPUT"
-            echo "url=$URL"               >> "$GITHUB_OUTPUT"
-            echo "sha256=$SHA256"         >> "$GITHUB_OUTPUT"
-            echo "size=$ACTUAL_SIZE"      >> "$GITHUB_OUTPUT"
+            echo "new_version=true"     >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION"     >> "$GITHUB_OUTPUT"
+            echo "url=$URL"            >> "$GITHUB_OUTPUT"
+            echo "sha256=$SHA256"      >> "$GITHUB_OUTPUT"
+            echo "size=$ACTUAL_SIZE"   >> "$GITHUB_OUTPUT"
           fi
 
-  # ── 2. Update manifest, build Flatpak, publish GitHub Release ────────────
+  # ── 2. Update manifest, build bundle, upload artifact ────────────────────
   build:
-    name: Build and publish
+    name: Build Flatpak
     needs: check
     if: needs.check.outputs.new_version == 'true'
     runs-on: ubuntu-latest
@@ -84,15 +80,12 @@ jobs:
           SHA256:  ${{ needs.check.outputs.sha256 }}
           SIZE:    ${{ needs.check.outputs.size }}
         run: |
-          # Update extra-data fields
           sed -i "s|url: https://proton\.me/download/authenticator/linux/.*\.rpm|url: ${URL}|" \
             me.proton.Authenticator.yml
           sed -i "s|sha256: [a-f0-9]\{64\}|sha256: ${SHA256}|" \
             me.proton.Authenticator.yml
           sed -i "s|size: [0-9]\+|size: ${SIZE}|" \
             me.proton.Authenticator.yml
-
-          # Update release entry in metainfo (date is approximate; edit manually if needed)
           TODAY=$(date -u +%Y-%m-%d)
           sed -i "s|<release version=\"[^\"]*\" date=\"[^\"]*\">|<release version=\"${VERSION%-*}\" date=\"${TODAY}\">|" \
             me.proton.Authenticator.metainfo.xml
@@ -104,6 +97,13 @@ jobs:
           manifest-path: me.proton.Authenticator.yml
           cache-key: flatpak-builder-${{ github.sha }}
 
+      - name: Upload bundle as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProtonAuthenticator-${{ needs.check.outputs.version }}
+          path: ProtonAuthenticator-${{ needs.check.outputs.version }}.flatpak
+          retention-days: 90
+
       - name: Commit manifest and metainfo updates
         run: |
           git config user.name  "github-actions[bot]"
@@ -111,27 +111,3 @@ jobs:
           git add me.proton.Authenticator.yml me.proton.Authenticator.metainfo.xml
           git commit -m "chore: update to Proton Authenticator ${{ needs.check.outputs.version }} [skip ci]"
           git push
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ needs.check.outputs.version }}
-          name: Proton Authenticator ${{ needs.check.outputs.version }}
-          body: |
-            Automated Flatpak build of **Proton Authenticator ${{ needs.check.outputs.version }}**.
-
-            ## Install
-
-            Download the `.flatpak` bundle below and run:
-
-            ```bash
-            flatpak install ProtonAuthenticator-${{ needs.check.outputs.version }}.flatpak
-            flatpak run me.proton.Authenticator
-            ```
-
-            > **Note:** The binary is not bundled here — it is downloaded directly from
-            > Proton's servers and verified against its sha256 checksum when you install.
-
-            ---
-            Source: ${{ needs.check.outputs.url }}
-          files: ProtonAuthenticator-${{ needs.check.outputs.version }}.flatpak
